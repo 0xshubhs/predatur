@@ -1,4 +1,4 @@
-VERSION := 1.0.0
+VERSION := 2.0.0
 PKG := predatortune
 DEB := $(PKG)_$(VERSION)_all.deb
 BUILD := deb-build/$(PKG)_$(VERSION)
@@ -19,6 +19,11 @@ deb:
 	@chmod 755 $(BUILD)/usr/bin/predatortune
 	@cp predatortune.py $(BUILD)/usr/lib/predatortune/
 	@chmod 755 $(BUILD)/usr/lib/predatortune/predatortune.py
+	@cp kmod/predatortune_fan.ko $(BUILD)/usr/lib/predatortune/ 2>/dev/null || true
+	@mkdir -p $(BUILD)/etc/udev/rules.d
+	@cp 99-predatortune.rules $(BUILD)/etc/udev/rules.d/
+	@mkdir -p $(BUILD)/etc/modules-load.d
+	@printf 'predatortune_fan\n' > $(BUILD)/etc/modules-load.d/predatortune.conf
 	@cp predatortune-helper $(BUILD)/usr/local/bin/
 	@chmod 755 $(BUILD)/usr/local/bin/predatortune-helper
 	@cp predatortune.desktop $(BUILD)/usr/share/applications/
