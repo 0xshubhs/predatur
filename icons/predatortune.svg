@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3d3846"/>
+      <stop offset="100%" stop-color="#241f31"/>
+    </linearGradient>
+    <linearGradient id="fan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#99c1f1"/>
+      <stop offset="100%" stop-color="#3584e4"/>
+    </linearGradient>
+    <linearGradient id="hot" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f66151"/>
+      <stop offset="100%" stop-color="#c01c28"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="20" fill="url(#bg)"/>
+  <g transform="translate(64,58)">
+    <circle r="28" fill="none" stroke="url(#fan)" stroke-width="2.5" opacity="0.3"/>
+    <circle r="6" fill="url(#fan)" opacity="0.9"/>
+    <g fill="url(#fan)" opacity="0.85">
+      <path d="M0,-6 C8,-18 20,-26 6,-26 C-4,-26 -10,-18 0,-6Z"/>
+      <path d="M0,-6 C8,-18 20,-26 6,-26 C-4,-26 -10,-18 0,-6Z" transform="rotate(72)"/>
+      <path d="M0,-6 C8,-18 20,-26 6,-26 C-4,-26 -10,-18 0,-6Z" transform="rotate(144)"/>
+      <path d="M0,-6 C8,-18 20,-26 6,-26 C-4,-26 -10,-18 0,-6Z" transform="rotate(216)"/>
+      <path d="M0,-6 C8,-18 20,-26 6,-26 C-4,-26 -10,-18 0,-6Z" transform="rotate(288)"/>
+    </g>
+  </g>
+  <rect x="24" y="96" width="80" height="8" rx="4" fill="#3d3846" stroke="#57e389" stroke-width="1"/>
+  <rect x="24" y="96" width="50" height="8" rx="4" fill="url(#hot)" opacity="0.9"/>
+  <text x="64" y="118" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="bold" fill="#deddda">PREDATORTUNE</text>
+</svg>

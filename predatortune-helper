@@ -1,0 +1,38 @@
+#!/bin/bash
+# PredatorTune helper -- intended to be called via pkexec.
+# Restricts commands to only what PredatorTune needs.
+
+set -euo pipefail
+
+ACTION="$1"
+shift
+
+case "$ACTION" in
+    set-speed)
+        FAN_INDEX="$1"
+        PERCENT="$2"
+        # Validate fan index is 0 or 1
+        if [[ "$FAN_INDEX" != "0" && "$FAN_INDEX" != "1" ]]; then
+            echo "Invalid fan index" >&2
+            exit 1
+        fi
+        # Validate percent is a number 0-100
+        if ! echo "$PERCENT" | grep -qE '^[0-9]+(\.[0-9]+)?$'; then
+            echo "Invalid speed percentage" >&2
+            exit 1
+        fi
+        exec nbfc set -f "$FAN_INDEX" -s "$PERCENT"
+        ;;
+    set-auto)
+        FAN_INDEX="$1"
+        if [[ "$FAN_INDEX" != "0" && "$FAN_INDEX" != "1" ]]; then
+            echo "Invalid fan index" >&2
+            exit 1
+        fi
+        exec nbfc set -f "$FAN_INDEX" -a
+        ;;
+    *)
+        echo "Unknown action: $ACTION" >&2
+        exit 1
+        ;;
+esac

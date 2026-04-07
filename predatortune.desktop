@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=PredatorTune
+Comment=Fan control for Acer Predator laptops
+Exec=predatortune
+Icon=predatortune
+Terminal=false
+Type=Application
+Categories=System;Settings;HardwareSettings;
+Keywords=fan;temperature;cooling;nbfc;predator;
+StartupNotify=true
