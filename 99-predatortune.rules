@@ -1,0 +1,1 @@
+SUBSYSTEM=="module", KERNEL=="predatortune_fan", RUN+="/bin/chmod 666 /sys/kernel/predatortune/fan_speed"
