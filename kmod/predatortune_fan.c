@@ -97,7 +97,7 @@ static ssize_t fan_speed_store(struct kobject *kobj,
 }
 
 static struct kobj_attribute fan_speed_attr =
-	__ATTR(fan_speed, 0666, fan_speed_show, fan_speed_store);
+	__ATTR(fan_speed, 0644, fan_speed_show, fan_speed_store);
 
 static int __init predatortune_fan_init(void)
 {

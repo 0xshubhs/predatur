@@ -456,17 +456,9 @@ class PredatorTuneWindow(Adw.ApplicationWindow):
         self.fan_speed_labels[fan_index].set_label(f"{speed}%")
         self._fan_manual = True
         self.fan_auto_label.set_label("")
-        # Debounce: wait 300ms after last slider move before writing
-        if hasattr(self, '_fan_debounce_id') and self._fan_debounce_id:
-            GLib.source_remove(self._fan_debounce_id)
-        self._fan_debounce_id = GLib.timeout_add(300, self._apply_fan_speed)
-
-    def _apply_fan_speed(self):
-        self._fan_debounce_id = None
         cpu_pct = int(self.fan_sliders[0].get_value())
         gpu_pct = int(self.fan_sliders[1].get_value())
         set_fan_speed(cpu_pct, gpu_pct)
-        return False  # don't repeat
 
     def _on_fan_auto_clicked(self, btn):
         self._fan_manual = False

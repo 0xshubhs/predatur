@@ -1,4 +1,5 @@
 *.deb
 deb-build/
-__pycache__/
-*.pyc
+# Compiled binaries (built from .c sources)
+/predatortune
+/predatortune-helper

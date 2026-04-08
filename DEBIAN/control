@@ -2,12 +2,11 @@ Package: predatortune
 Version: 2.0.0
 Section: utils
 Priority: optional
-Architecture: all
-Depends: python3 (>= 3.10), python3-gi, gir1.2-adw-1, gir1.2-gtk-4.0, python3-gi-cairo, lm-sensors
+Architecture: amd64
+Depends: libadwaita-1-0 (>= 1.2), libgtk-4-1 (>= 4.8), lm-sensors
 Maintainer: Madhav <madhav@meowdev>
 Description: Fan & thermal control GUI for Acer Predator laptops on Linux
- PredatorTune is a GTK4/Adwaita thermal control application for Acer Predator
- laptops running Linux. It provides real-time temperature and fan monitoring,
- and performance mode switching (Power Saver/Quiet/Balanced/Boost/Turbo)
- via kernel platform_profile. No NBFC required.
+ PredatorTune is a native GTK4/Adwaita thermal control application for Acer
+ Predator laptops running Linux. It provides real-time temperature and fan
+ monitoring, and performance mode switching via kernel platform_profile.
 Homepage: https://github.com/0xshubhs/predatur
