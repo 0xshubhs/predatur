@@ -21,7 +21,29 @@
 #define PLATFORM_PROFILE         "/sys/firmware/acpi/platform_profile"
 #define PLATFORM_PROFILE_CHOICES "/sys/firmware/acpi/platform_profile_choices"
 #define HELPER_PATH              "/usr/local/bin/predatortune-helper"
-#define FAN_SPEED_SYSFS          "/sys/devices/platform/acer-wmi/predator_sense/fan_speed"
+#define SENSE_DIR                "/sys/devices/platform/acer-wmi/predator_sense"
+#define FAN_SPEED_SYSFS          SENSE_DIR "/fan_speed"
+#define BATTERY_LIMIT_SYSFS      SENSE_DIR "/battery_limiter"
+#define KB_ZONES_SYSFS \
+    "/sys/devices/platform/acer-wmi/four_zoned_kb/per_zone_mode"
+
+/* Four zones then a brightness: "rrggbb,rrggbb,rrggbb,rrggbb,brightness". */
+typedef struct {
+    const char *label;
+    const char *hex;
+} KbColour;
+
+static const KbColour kb_colours[] = {
+    { "Teal",   "00aec7" },
+    { "Red",    "ff0000" },
+    { "Green",  "00ff00" },
+    { "Blue",   "0000ff" },
+    { "Purple", "8000ff" },
+    { "Orange", "ff6000" },
+    { "Pink",   "ff00c0" },
+    { "White",  "ffffff" },
+};
+#define N_KB_COLOURS (sizeof(kb_colours) / sizeof(kb_colours[0]))
 
 static char hwmon_fan[256];       /* acer-wmi hwmon path */
 static char hwmon_coretemp[256];  /* coretemp hwmon path */
@@ -213,6 +235,94 @@ static int fan_module_loaded(void)
 }
 
 /*
+ * tmpfiles opens these to 0666 so the window can write them directly. If that
+ * has not happened, fall back to the helper — which takes named actions, never
+ * a path, so an argument can only decide what is written and not where.
+ */
+static void write_sysfs(const char *path, const char *value, char **helper_argv)
+{
+    FILE *f = fopen(path, "w");
+
+    if (f) {
+        fputs(value, f);
+        fclose(f);
+        return;
+    }
+    run_detached(helper_argv);
+}
+
+static int battery_limit_supported(void)
+{
+    return access(BATTERY_LIMIT_SYSFS, F_OK) == 0;
+}
+
+static int battery_limit_on(void)
+{
+    int v;
+
+    return read_sysfs_int(BATTERY_LIMIT_SYSFS, &v) == 0 && v == 1;
+}
+
+static void set_battery_limit(int on)
+{
+    char *argv[] = { "pkexec", (char *)HELPER_PATH, "set-battery-limit",
+                     on ? "1" : "0", NULL };
+    write_sysfs(BATTERY_LIMIT_SYSFS, on ? "1" : "0", argv);
+}
+
+static int kb_supported(void)
+{
+    return access(KB_ZONES_SYSFS, F_OK) == 0;
+}
+
+/* First zone's colour, which is what the window sets all four to. */
+static int kb_read_colour(char *out, size_t n)
+{
+    FILE *f = fopen(KB_ZONES_SYSFS, "r");
+    char line[128];
+    char *comma;
+
+    if (!f)
+        return -1;
+    if (!fgets(line, sizeof(line), f)) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    comma = strchr(line, ',');
+    if (!comma)
+        return -1;
+    *comma = '\0';
+    snprintf(out, n, "%s", line);
+    return 0;
+}
+
+/* Keep whatever brightness is set; only the colour is being changed. */
+static void kb_set_colour(const char *hex)
+{
+    FILE *f = fopen(KB_ZONES_SYSFS, "r");
+    char line[128], bright[16] = "100", value[128];
+    char *argv[] = { "pkexec", (char *)HELPER_PATH, "set-kb-colour",
+                     (char *)hex, NULL };
+
+    if (f) {
+        if (fgets(line, sizeof(line), f)) {
+            char *tok = strtok(line, ",\n");
+            for (int i = 0; tok && i < 5; i++) {
+                if (i == 4)
+                    snprintf(bright, sizeof(bright), "%s", tok);
+                tok = strtok(NULL, ",\n");
+            }
+        }
+        fclose(f);
+    }
+
+    snprintf(value, sizeof(value), "%s,%s,%s,%s,%s", hex, hex, hex, hex, bright);
+    write_sysfs(KB_ZONES_SYSFS, value, argv);
+}
+
+/*
  * With Secure Boot on, the kernel refuses any module whose signing key the
  * firmware does not trust — including everything DKMS builds here. The
  * distinguishing sign is that the module is installed but will not load.
@@ -278,6 +388,19 @@ static void set_fan_speed(int cpu_pct, int gpu_pct)
 /* -------------------------------------------------------------------------- */
 
 static const char *CSS =
+    /* Keyboard swatches. One class per colour so the button shows the colour
+     * itself rather than only naming it. */
+    ".kb-swatch { border-radius: 8px; border: 1px solid alpha(#fff, 0.25); }\n"
+    ".kb-swatch.current { border: 2px solid #fff; }\n"
+    ".kb-00aec7 { background: #00aec7; }\n"
+    ".kb-ff0000 { background: #ff0000; }\n"
+    ".kb-00ff00 { background: #00ff00; }\n"
+    ".kb-0000ff { background: #0000ff; }\n"
+    ".kb-8000ff { background: #8000ff; }\n"
+    ".kb-ff6000 { background: #ff6000; }\n"
+    ".kb-ff00c0 { background: #ff00c0; }\n"
+    ".kb-ffffff { background: #ffffff; }\n"
+    "\n"
     ".temp-green  { color: #57e389; }\n"
     ".temp-yellow { color: #f9f06b; }\n"
     ".temp-red    { color: #ed333b; }\n"
@@ -381,6 +504,17 @@ typedef struct {
     char       available_profiles[16][32];
     int        available_profile_count;
 
+    /* Battery */
+    GtkWidget *battery_switch;
+    GtkWidget *battery_note;
+
+    /* Keyboard zones */
+    GtkWidget *kb_buttons[N_KB_COLOURS];
+
+    /* Set while the refresh tick writes the widgets, so echoing a hardware
+     * value back into a switch does not look like the user toggling it. */
+    int        syncing;
+
     /* Status bar */
     GtkWidget *status_label;
 
@@ -451,6 +585,21 @@ static void on_fan_auto_clicked(GtkButton *btn, gpointer user_data)
     set_fan_speed(0, 0);
 }
 
+static void on_battery_toggled(GObject *sw, GParamSpec *spec, gpointer user_data)
+{
+    (void)spec;
+    (void)user_data;
+    if (app_state.syncing)
+        return;
+    set_battery_limit(gtk_switch_get_active(GTK_SWITCH(sw)));
+}
+
+static void on_kb_colour_clicked(GtkButton *btn, gpointer user_data)
+{
+    (void)btn;
+    kb_set_colour((const char *)user_data);
+}
+
 static void on_profile_clicked(GtkButton *btn, gpointer user_data)
 {
     (void)btn;
@@ -467,6 +616,39 @@ static gboolean refresh(gpointer user_data)
 {
     (void)user_data;
     char buf[256];
+
+    /* Battery limiter: show what the hardware says, not what was last clicked,
+     * so an external change (the tray, PredatorSense on a dual boot) shows up. */
+    if (app_state.battery_switch) {
+        int supported = battery_limit_supported();
+        gtk_widget_set_sensitive(app_state.battery_switch, supported);
+        if (supported) {
+            app_state.syncing = 1;
+            gtk_switch_set_active(GTK_SWITCH(app_state.battery_switch),
+                                  battery_limit_on());
+            app_state.syncing = 0;
+        } else {
+            gtk_label_set_label(GTK_LABEL(app_state.battery_note),
+                                "Needs the linuwu_sense driver.");
+        }
+    }
+
+    /* Mark whichever keyboard colour is actually set. */
+    char kb_now[32] = "";
+    if (kb_supported() && kb_read_colour(kb_now, sizeof(kb_now)) == 0) {
+        for (int i = 0; i < (int)N_KB_COLOURS; i++) {
+            if (!app_state.kb_buttons[i])
+                continue;
+            GtkWidget *swatch = gtk_widget_get_first_child(
+                gtk_button_get_child(GTK_BUTTON(app_state.kb_buttons[i])));
+            if (!swatch)
+                continue;
+            if (g_ascii_strcasecmp(kb_now, kb_colours[i].hex) == 0)
+                gtk_widget_add_css_class(swatch, "current");
+            else
+                gtk_widget_remove_css_class(swatch, "current");
+        }
+    }
 
     /* CPU temp */
     double cpu_t = read_cpu_temp();
@@ -763,6 +945,85 @@ static void build_window(AdwApplication *adw_app)
         gtk_flow_box_append(GTK_FLOW_BOX(mode_flow), btn);
 
         app_state.profile_buttons[i] = btn;
+    }
+
+    /* ---- Battery ---- */
+    GtkWidget *bat_group = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(bat_group), "Battery");
+    gtk_box_append(GTK_BOX(content), bat_group);
+
+    GtkWidget *bat_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_start(bat_row, 4);
+    gtk_widget_set_margin_end(bat_row, 4);
+
+    GtkWidget *bat_text = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_hexpand(bat_text, TRUE);
+    GtkWidget *bat_title = gtk_label_new("Stop charging at 80%");
+    gtk_label_set_xalign(GTK_LABEL(bat_title), 0.0);
+    gtk_box_append(GTK_BOX(bat_text), bat_title);
+
+    app_state.battery_note = gtk_label_new(
+        "Caps future charging. It will not discharge down to 80% on its own.");
+    gtk_label_set_xalign(GTK_LABEL(app_state.battery_note), 0.0);
+    gtk_widget_add_css_class(app_state.battery_note, "profile-desc");
+    gtk_box_append(GTK_BOX(bat_text), app_state.battery_note);
+    gtk_box_append(GTK_BOX(bat_row), bat_text);
+
+    app_state.battery_switch = gtk_switch_new();
+    gtk_widget_set_valign(app_state.battery_switch, GTK_ALIGN_CENTER);
+    gtk_widget_set_sensitive(app_state.battery_switch, battery_limit_supported());
+    g_signal_connect(app_state.battery_switch, "notify::active",
+                     G_CALLBACK(on_battery_toggled), NULL);
+    gtk_box_append(GTK_BOX(bat_row), app_state.battery_switch);
+
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(bat_group), bat_row);
+
+    /* ---- Keyboard ---- */
+    GtkWidget *kb_group = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(kb_group),
+                                    "Keyboard Backlight");
+    gtk_box_append(GTK_BOX(content), kb_group);
+
+    if (!kb_supported()) {
+        GtkWidget *no_kb = gtk_label_new("Keyboard zones are not available.");
+        gtk_widget_add_css_class(no_kb, "fan-label");
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(kb_group), no_kb);
+    } else {
+        GtkWidget *kb_flow = gtk_flow_box_new();
+        gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(kb_flow), GTK_SELECTION_NONE);
+        gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(kb_flow), TRUE);
+        gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(kb_flow), 8);
+        gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(kb_flow), 4);
+        gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(kb_flow), 8);
+        gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(kb_flow), 8);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(kb_group), kb_flow);
+
+        for (int i = 0; i < (int)N_KB_COLOURS; i++) {
+            GtkWidget *btn = gtk_button_new();
+            gtk_widget_add_css_class(btn, "profile-btn");
+
+            GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+            gtk_widget_set_halign(col, GTK_ALIGN_CENTER);
+
+            /* A filled swatch, so the colour is the label. */
+            GtkWidget *swatch = gtk_drawing_area_new();
+            gtk_widget_set_size_request(swatch, 34, 34);
+            char css_class[32];
+            snprintf(css_class, sizeof(css_class), "kb-%s", kb_colours[i].hex);
+            gtk_widget_add_css_class(swatch, css_class);
+            gtk_widget_add_css_class(swatch, "kb-swatch");
+            gtk_box_append(GTK_BOX(col), swatch);
+
+            GtkWidget *lbl = gtk_label_new(kb_colours[i].label);
+            gtk_widget_add_css_class(lbl, "profile-desc");
+            gtk_box_append(GTK_BOX(col), lbl);
+
+            gtk_button_set_child(GTK_BUTTON(btn), col);
+            g_signal_connect(btn, "clicked", G_CALLBACK(on_kb_colour_clicked),
+                             (gpointer)kb_colours[i].hex);
+            gtk_flow_box_append(GTK_FLOW_BOX(kb_flow), btn);
+            app_state.kb_buttons[i] = btn;
+        }
     }
 
     /* ---- Status bar ---- */
