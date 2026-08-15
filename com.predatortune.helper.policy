@@ -9,10 +9,21 @@
   <action id="com.predatortune.helper">
     <description>PredatorTune fan control</description>
     <message>PredatorTune needs permission to control fan speeds</message>
+    <!--
+      Whoever is sitting at the machine can already set fan speed without a
+      password, because the udev rule leaves fan_speed world-writable. Asking
+      for one to switch a thermal profile therefore bought nothing except a
+      prompt on every single click.
+
+      The helper only ever writes a profile name checked against a fixed list,
+      or a fan percentage the kernel module range-checks, so the worst a local
+      user can do is make the laptop loud or slow. Remote and inactive
+      sessions still have to prove themselves.
+    -->
     <defaults>
-      <allow_any>auth_admin_keep</allow_any>
-      <allow_inactive>auth_admin_keep</allow_inactive>
-      <allow_active>auth_admin_keep</allow_active>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/predatortune-helper</annotate>
     <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
