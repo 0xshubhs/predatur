@@ -194,17 +194,57 @@ static int read_profile_choices(char choices[][32], int max_count)
     return count;
 }
 
+/*
+ * Never call system() from a button handler. It waits for the command to
+ * finish, and pkexec does not return until the password dialog is answered,
+ * so the window stops redrawing and the desktop offers to force quit it.
+ */
+static void run_detached(char **argv)
+{
+    g_spawn_async(NULL, argv, NULL,
+                  G_SPAWN_SEARCH_PATH | G_SPAWN_STDOUT_TO_DEV_NULL
+                      | G_SPAWN_STDERR_TO_DEV_NULL,
+                  NULL, NULL, NULL, NULL);
+}
+
+static int fan_module_loaded(void)
+{
+    return access(FAN_SPEED_SYSFS, F_OK) == 0;
+}
+
+/*
+ * With Secure Boot on, the kernel refuses any module whose signing key the
+ * firmware does not trust — including everything DKMS builds here. The
+ * distinguishing sign is that the module is installed but will not load.
+ */
+static int secure_boot_blocking(void)
+{
+    FILE *f = fopen("/sys/kernel/security/lockdown", "r");
+    char buf[128];
+    int locked = 0;
+
+    if (!f)
+        return 0;
+    if (fgets(buf, sizeof(buf), f)) {
+        /* The active mode is the one in brackets. "none" means no lockdown. */
+        locked = strstr(buf, "[integrity]") != NULL
+                 || strstr(buf, "[confidentiality]") != NULL;
+    }
+    fclose(f);
+    return locked && !fan_module_loaded();
+}
+
 static void set_profile(const char *name)
 {
     if (access(HELPER_PATH, X_OK) == 0) {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "pkexec %s set-profile %s", HELPER_PATH, name);
-        /* fire and forget */
-        if (system(cmd)) { /* ignore */ }
+        char *argv[] = { "pkexec", (char *)HELPER_PATH, "set-profile",
+                         (char *)name, NULL };
+        run_detached(argv);
     } else {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "pkexec bash -c 'echo %s > %s'", name, PLATFORM_PROFILE);
-        if (system(cmd)) { /* ignore */ }
+        char script[256];
+        snprintf(script, sizeof(script), "echo %s > %s", name, PLATFORM_PROFILE);
+        char *argv[] = { "pkexec", "bash", "-c", script, NULL };
+        run_detached(argv);
     }
 }
 
@@ -214,17 +254,23 @@ static void set_fan_speed(int cpu_pct, int gpu_pct)
     if (f) {
         fprintf(f, "%d,%d", cpu_pct, gpu_pct);
         fclose(f);
-    } else {
-        char cmd[512];
-        snprintf(cmd, sizeof(cmd), "pkexec %s set-fan-speed %d %d",
-                 HELPER_PATH, cpu_pct, gpu_pct);
-        if (system(cmd)) { /* ignore */ }
+        return;
     }
-}
 
-static int fan_module_loaded(void)
-{
-    return access(FAN_SPEED_SYSFS, F_OK) == 0;
+    /*
+     * With the module absent there is nothing for the helper to write to, so
+     * asking for a password would buy a guaranteed failure. The banner in the
+     * window already says why.
+     */
+    if (!fan_module_loaded())
+        return;
+
+    char cpu[8], gpu[8];
+    snprintf(cpu, sizeof(cpu), "%d", cpu_pct);
+    snprintf(gpu, sizeof(gpu), "%d", gpu_pct);
+    char *argv[] = { "pkexec", (char *)HELPER_PATH, "set-fan-speed",
+                     cpu, gpu, NULL };
+    run_detached(argv);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -608,8 +654,22 @@ static void build_window(AdwApplication *adw_app)
     GtkWidget *fan_ctrl_group = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(fan_ctrl_group), "Fan Speed Control");
     if (!fan_module_loaded()) {
+        /*
+         * Telling someone to insmod it is useless advice under Secure Boot,
+         * which refuses the module however it is loaded. Name the real cause
+         * and the one command that fixes it.
+         */
         GtkWidget *no_mod = gtk_label_new(
-            "Kernel module not loaded. Run: sudo insmod predatortune_fan.ko");
+            secure_boot_blocking()
+                ? "Fan control is blocked by Secure Boot: this machine's module "
+                  "signing key is not enrolled yet.\n"
+                  "Fix with:  sudo mokutil --import /var/lib/shim-signed/mok/MOK.der\n"
+                  "then reboot and choose Enroll MOK. Performance modes work "
+                  "either way."
+                : "Fan control module is not loaded.\n"
+                  "Try:  sudo modprobe predatortune_fan");
+        gtk_label_set_justify(GTK_LABEL(no_mod), GTK_JUSTIFY_CENTER);
+        gtk_label_set_wrap(GTK_LABEL(no_mod), TRUE);
         gtk_widget_add_css_class(no_mod, "fan-label");
         adw_preferences_group_add(ADW_PREFERENCES_GROUP(fan_ctrl_group), no_mod);
     }

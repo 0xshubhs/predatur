@@ -107,6 +107,18 @@ def fan_percent():
         return None
 
 
+def secure_boot_blocking():
+    """
+    With Secure Boot on, the kernel refuses modules signed by a key the
+    firmware does not trust — which is everything DKMS builds locally. The
+    tell is that the module is installed but its sysfs file never appears.
+    """
+    if os.path.exists(FAN_SPEED):
+        return False
+    mode = read("/sys/kernel/security/lockdown") or ""
+    return "[integrity]" in mode or "[confidentiality]" in mode
+
+
 def manual_mode():
     return os.path.exists(MANUAL_FLAG)
 
@@ -270,7 +282,10 @@ class Tray:
         )
 
         if fan is None:
-            self.items["fan"].set_label("Fans  module not loaded")
+            self.items["fan"].set_label(
+                "Fans  blocked by Secure Boot" if secure_boot_blocking()
+                else "Fans  module not loaded"
+            )
         elif fan == (0, 0):
             self.items["fan"].set_label("Fans  firmware auto")
         else:
@@ -279,6 +294,10 @@ class Tray:
         self.items["mode"].set_label(
             "Set by hand" if manual else "Following temperature"
         )
+
+        # Nothing to write to, so do not offer speeds that cannot be applied.
+        for label, _ in PRESETS:
+            self.items[f"preset:{label}"].set_sensitive(fan is not None)
 
         # Reflect reality in the radio items without re-triggering them.
         self.updating = True
