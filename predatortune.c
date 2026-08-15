@@ -275,12 +275,15 @@ static int kb_supported(void)
     return access(KB_ZONES_SYSFS, F_OK) == 0;
 }
 
-/* First zone's colour, which is what the window sets all four to. */
-static int kb_read_colour(char *out, size_t n)
+/*
+ * Split "rrggbb,rrggbb,rrggbb,rrggbb,brightness" into its parts. Either
+ * output may be NULL if the caller only wants the other.
+ */
+static int kb_read_zones(char zones[4][8], int *brightness)
 {
     FILE *f = fopen(KB_ZONES_SYSFS, "r");
-    char line[128];
-    char *comma;
+    char line[160], *tok;
+    int i = 0;
 
     if (!f)
         return -1;
@@ -290,12 +293,43 @@ static int kb_read_colour(char *out, size_t n)
     }
     fclose(f);
 
-    comma = strchr(line, ',');
-    if (!comma)
+    for (tok = strtok(line, ",\n"); tok && i < 5; tok = strtok(NULL, ",\n"), i++) {
+        if (i < 4) {
+            if (zones)
+                snprintf(zones[i], 8, "%s", tok);
+        } else if (brightness) {
+            *brightness = atoi(tok);
+        }
+    }
+    return i >= 4 ? 0 : -1;
+}
+
+/* First zone's colour, which is what the presets set all four to. */
+static int kb_read_colour(char *out, size_t n)
+{
+    char zones[4][8];
+
+    if (kb_read_zones(zones, NULL) != 0)
         return -1;
-    *comma = '\0';
-    snprintf(out, n, "%s", line);
+    snprintf(out, n, "%s", zones[0]);
     return 0;
+}
+
+/* Set the four zones independently. */
+static void kb_set_zones(char zones[4][8], int brightness)
+{
+    char value[160];
+    char b[8];
+    char *argv[] = { "pkexec", (char *)HELPER_PATH, "set-kb-zones",
+                     zones[0], zones[1], zones[2], zones[3], b, NULL };
+
+    if (brightness < 0)   brightness = 0;
+    if (brightness > 100) brightness = 100;
+    snprintf(b, sizeof(b), "%d", brightness);
+
+    snprintf(value, sizeof(value), "%s,%s,%s,%s,%d",
+             zones[0], zones[1], zones[2], zones[3], brightness);
+    write_sysfs(KB_ZONES_SYSFS, value, argv);
 }
 
 /* Keep whatever brightness is set; only the colour is being changed. */
@@ -510,6 +544,8 @@ typedef struct {
 
     /* Keyboard zones */
     GtkWidget *kb_buttons[N_KB_COLOURS];
+    GtkWidget *kb_zone_pickers[4];
+    GtkWidget *kb_brightness;
 
     /* Set while the refresh tick writes the widgets, so echoing a hardware
      * value back into a switch does not look like the user toggling it. */
@@ -598,6 +634,50 @@ static void on_kb_colour_clicked(GtkButton *btn, gpointer user_data)
 {
     (void)btn;
     kb_set_colour((const char *)user_data);
+}
+
+/* Read all four pickers and the brightness, and push the lot at once — the
+ * hardware takes the zones as a single value, not one at a time. */
+static void kb_apply_from_widgets(void)
+{
+    char zones[4][8];
+    int brightness = 100;
+
+    if (app_state.syncing)
+        return;
+
+    for (int i = 0; i < 4; i++) {
+        const GdkRGBA *c;
+
+        if (!app_state.kb_zone_pickers[i])
+            return;
+        c = gtk_color_dialog_button_get_rgba(
+                GTK_COLOR_DIALOG_BUTTON(app_state.kb_zone_pickers[i]));
+        snprintf(zones[i], sizeof(zones[i]), "%02x%02x%02x",
+                 (int)(c->red   * 255.0 + 0.5),
+                 (int)(c->green * 255.0 + 0.5),
+                 (int)(c->blue  * 255.0 + 0.5));
+    }
+
+    if (app_state.kb_brightness)
+        brightness = (int)gtk_range_get_value(GTK_RANGE(app_state.kb_brightness));
+
+    kb_set_zones(zones, brightness);
+}
+
+static void on_kb_zone_changed(GObject *btn, GParamSpec *spec, gpointer user_data)
+{
+    (void)btn;
+    (void)spec;
+    (void)user_data;
+    kb_apply_from_widgets();
+}
+
+static void on_kb_brightness_changed(GtkRange *range, gpointer user_data)
+{
+    (void)range;
+    (void)user_data;
+    kb_apply_from_widgets();
 }
 
 static void on_profile_clicked(GtkButton *btn, gpointer user_data)
@@ -1024,6 +1104,80 @@ static void build_window(AdwApplication *adw_app)
             gtk_flow_box_append(GTK_FLOW_BOX(kb_flow), btn);
             app_state.kb_buttons[i] = btn;
         }
+
+        /* ---- per zone ---- */
+        GtkWidget *zone_hdr = gtk_label_new("Or set each zone separately");
+        gtk_label_set_xalign(GTK_LABEL(zone_hdr), 0.0);
+        gtk_widget_add_css_class(zone_hdr, "profile-desc");
+        gtk_widget_set_margin_top(zone_hdr, 10);
+        gtk_widget_set_margin_start(zone_hdr, 4);
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(kb_group), zone_hdr);
+
+        GtkWidget *zone_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+        gtk_widget_set_margin_start(zone_row, 4);
+        gtk_widget_set_margin_end(zone_row, 4);
+        gtk_widget_set_margin_top(zone_row, 4);
+        gtk_box_set_homogeneous(GTK_BOX(zone_row), TRUE);
+
+        char cur_zones[4][8];
+        int cur_bright = 100;
+        int have_cur = kb_read_zones(cur_zones, &cur_bright) == 0;
+
+        for (int i = 0; i < 4; i++) {
+            GtkWidget *cell = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+
+            char zlabel[16];
+            snprintf(zlabel, sizeof(zlabel), "Zone %d", i + 1);
+            GtkWidget *zl = gtk_label_new(zlabel);
+            gtk_widget_add_css_class(zl, "profile-desc");
+            gtk_box_append(GTK_BOX(cell), zl);
+
+            GtkColorDialog *dialog = gtk_color_dialog_new();
+            gtk_color_dialog_set_with_alpha(dialog, FALSE);
+            GtkWidget *picker = gtk_color_dialog_button_new(dialog);
+
+            if (have_cur) {
+                GdkRGBA rgba;
+                char spec[16];
+                snprintf(spec, sizeof(spec), "#%s", cur_zones[i]);
+                if (gdk_rgba_parse(&rgba, spec))
+                    gtk_color_dialog_button_set_rgba(
+                        GTK_COLOR_DIALOG_BUTTON(picker), &rgba);
+            }
+
+            g_signal_connect(picker, "notify::rgba",
+                             G_CALLBACK(on_kb_zone_changed), NULL);
+            gtk_box_append(GTK_BOX(cell), picker);
+            app_state.kb_zone_pickers[i] = picker;
+
+            gtk_box_append(GTK_BOX(zone_row), cell);
+        }
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(kb_group), zone_row);
+
+        /* ---- brightness ---- */
+        GtkWidget *br_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+        gtk_widget_set_margin_start(br_row, 4);
+        gtk_widget_set_margin_end(br_row, 4);
+        gtk_widget_set_margin_top(br_row, 6);
+
+        GtkWidget *br_lbl = gtk_label_new("Brightness");
+        gtk_label_set_width_chars(GTK_LABEL(br_lbl), 10);
+        gtk_label_set_xalign(GTK_LABEL(br_lbl), 0.0);
+        gtk_widget_add_css_class(br_lbl, "fan-label");
+        gtk_box_append(GTK_BOX(br_row), br_lbl);
+
+        app_state.kb_brightness =
+            gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 10);
+        gtk_widget_set_hexpand(app_state.kb_brightness, TRUE);
+        gtk_scale_set_draw_value(GTK_SCALE(app_state.kb_brightness), TRUE);
+        gtk_scale_set_value_pos(GTK_SCALE(app_state.kb_brightness), GTK_POS_RIGHT);
+        gtk_range_set_value(GTK_RANGE(app_state.kb_brightness),
+                            have_cur ? cur_bright : 100);
+        g_signal_connect(app_state.kb_brightness, "value-changed",
+                         G_CALLBACK(on_kb_brightness_changed), NULL);
+        gtk_box_append(GTK_BOX(br_row), app_state.kb_brightness);
+
+        adw_preferences_group_add(ADW_PREFERENCES_GROUP(kb_group), br_row);
     }
 
     /* ---- Status bar ---- */

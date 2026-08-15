@@ -52,6 +52,21 @@ static int is_hex6(const char *s)
     return s[6] == '\0';
 }
 
+/* Digits only, and within 0-100. */
+static int is_percent(const char *s)
+{
+    int i, v;
+
+    if (!*s)
+        return 0;
+    for (i = 0; s[i]; i++) {
+        if (!isdigit((unsigned char)s[i]) || i > 2)
+            return 0;
+    }
+    v = atoi(s);
+    return v >= 0 && v <= 100;
+}
+
 static int write_file(const char *path, const char *data)
 {
     FILE *f = fopen(path, "w");
@@ -111,6 +126,29 @@ int main(int argc, char *argv[])
         char buf[64];
         snprintf(buf, sizeof(buf), "%s,%s,%s,%s,100",
                  argv[2], argv[2], argv[2], argv[2]);
+        return write_file(KB_ZONES_PATH, buf);
+
+    } else if (strcmp(action, "set-kb-zones") == 0) {
+        /* Four colours and a brightness, each checked before anything is
+         * written — same reasoning as set-kb-colour. */
+        if (argc < 7) {
+            fprintf(stderr,
+                    "Usage: %s set-kb-zones z1 z2 z3 z4 brightness\n", argv[0]);
+            return 1;
+        }
+        for (int i = 2; i <= 5; i++) {
+            if (!is_hex6(argv[i])) {
+                fprintf(stderr, "Zone %d is not rrggbb\n", i - 1);
+                return 1;
+            }
+        }
+        if (!is_percent(argv[6])) {
+            fprintf(stderr, "Brightness must be 0-100\n");
+            return 1;
+        }
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s,%s,%s,%s,%s",
+                 argv[2], argv[3], argv[4], argv[5], argv[6]);
         return write_file(KB_ZONES_PATH, buf);
 
     } else {
