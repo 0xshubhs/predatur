@@ -10,7 +10,7 @@ esac
 
 if [ "$1" = "purge" ]; then
     rm -rf /etc/predatortune
-    rm -rf /var/lib/dkms/predatortune
+    rm -rf /var/lib/dkms/predatortune /var/lib/dkms/linuwu-sense
 fi
 
 exit 0

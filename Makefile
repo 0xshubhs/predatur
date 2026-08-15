@@ -2,7 +2,7 @@ VERSION := 2.0.0
 PKG := predatortune
 DEB := $(PKG)_$(VERSION)_amd64.deb
 BUILD := deb-build/$(PKG)_$(VERSION)
-SRCDIR := $(BUILD)/usr/src/$(PKG)-$(VERSION)
+SRCDIR := $(BUILD)/usr/src/linuwu-sense-$(VERSION)
 
 CC := gcc
 CFLAGS := -O2 -Wall -Wextra $(shell pkg-config --cflags libadwaita-1 2>/dev/null)
@@ -43,6 +43,8 @@ deb: all
 	@mkdir -p $(BUILD)/usr/share/icons/hicolor/scalable/apps
 	@mkdir -p $(BUILD)/etc/udev/rules.d
 	@mkdir -p $(BUILD)/etc/modules-load.d
+	@mkdir -p $(BUILD)/etc/modprobe.d
+	@mkdir -p $(BUILD)/usr/lib/tmpfiles.d
 	@mkdir -p $(BUILD)/etc/predatortune
 	@mkdir -p $(BUILD)/etc/xdg/autostart
 	@mkdir -p $(BUILD)/lib/systemd/system
@@ -63,10 +65,15 @@ deb: all
 	@chmod 755 $(BUILD)/usr/bin/predatortune-tray
 	@cp predatortune-helper $(BUILD)/usr/local/bin/
 	@chmod 755 $(BUILD)/usr/local/bin/predatortune-helper
-# DKMS source, not a prebuilt .ko: rebuilt for whatever kernel is running.
-	@cp kmod/predatortune_fan.c kmod/Makefile dkms.conf $(SRCDIR)/
+# DKMS source, not a prebuilt .ko: rebuilt and re-signed for every kernel.
+# linuwu_sense replaces the in-tree acer_wmi and covers fan speed, the battery
+# limiter and the keyboard zones, so our own fan module is no longer built.
+	@cp linuwu/linuwu_sense.c linuwu/Makefile linuwu/dkms.conf linuwu/LICENSE $(SRCDIR)/
 	@cp 99-predatortune.rules $(BUILD)/etc/udev/rules.d/
-	@printf 'predatortune_fan\n' > $(BUILD)/etc/modules-load.d/predatortune.conf
+	@printf 'linuwu_sense\n' > $(BUILD)/etc/modules-load.d/predatortune.conf
+	@printf '# linuwu_sense is a fork of this driver and cannot coexist with it.\nblacklist acer_wmi\n' \
+		> $(BUILD)/etc/modprobe.d/predatortune.conf
+	@cp predatortune-tmpfiles.conf $(BUILD)/usr/lib/tmpfiles.d/predatortune.conf
 	@cp fan.conf $(BUILD)/etc/predatortune/fan.conf
 	@cp predatortune-daemon.service $(BUILD)/lib/systemd/system/
 	@cp predatortune-resume.service $(BUILD)/lib/systemd/system/

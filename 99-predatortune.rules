@@ -1,1 +1,5 @@
-SUBSYSTEM=="module", KERNEL=="predatortune_fan", RUN+="/bin/chmod 666 /sys/kernel/predatortune/fan_speed"
+# linuwu_sense creates its attributes when the acer-wmi platform device binds,
+# which is a udev event the permission fix can hang on. systemd-tmpfiles covers
+# the boot case; this covers the module being reloaded mid-session.
+ACTION=="add|change", SUBSYSTEM=="platform", KERNEL=="acer-wmi", \
+  RUN+="/bin/systemd-tmpfiles --create /usr/lib/tmpfiles.d/predatortune.conf"

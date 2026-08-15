@@ -21,7 +21,7 @@
 #define PLATFORM_PROFILE         "/sys/firmware/acpi/platform_profile"
 #define PLATFORM_PROFILE_CHOICES "/sys/firmware/acpi/platform_profile_choices"
 #define HELPER_PATH              "/usr/local/bin/predatortune-helper"
-#define FAN_SPEED_SYSFS          "/sys/kernel/predatortune/fan_speed"
+#define FAN_SPEED_SYSFS          "/sys/devices/platform/acer-wmi/predator_sense/fan_speed"
 
 static char hwmon_fan[256];       /* acer-wmi hwmon path */
 static char hwmon_coretemp[256];  /* coretemp hwmon path */

@@ -1,8 +1,9 @@
 #!/bin/bash
 set -e
 
-PKG=predatortune
+PKG=linuwu-sense
 VER=2.0.0
+OLDPKG=predatortune
 
 case "$1" in
 configure)
@@ -16,6 +17,16 @@ configure)
     # kernels installed later.
     # ---------------------------------------------------------------
     if command -v dkms >/dev/null 2>&1; then
+        # Retire the old standalone fan module: linuwu_sense drives the same
+        # WMI methods, and two drivers fighting over them helps nobody.
+        if dkms status -m "$OLDPKG" -v "$VER" 2>/dev/null | grep -q .; then
+            dkms remove -m "$OLDPKG" -v "$VER" --all >/dev/null 2>&1 || true
+        fi
+        rm -rf "/usr/src/$OLDPKG-$VER"
+        # rmmod, not modprobe -r: by now DKMS has taken the .ko away, so
+        # modprobe cannot resolve the name even though it is still resident.
+        rmmod predatortune_fan 2>/dev/null || true
+
         # Drop any half-registered copy from a previous install first.
         if dkms status -m "$PKG" -v "$VER" 2>/dev/null | grep -q .; then
             dkms remove -m "$PKG" -v "$VER" --all >/dev/null 2>&1 || true
@@ -24,10 +35,10 @@ configure)
         if dkms add -m "$PKG" -v "$VER" >/dev/null 2>&1 &&
            dkms build -m "$PKG" -v "$VER" >/dev/null 2>&1 &&
            dkms install -m "$PKG" -v "$VER" --force >/dev/null 2>&1; then
-            echo "predatortune_fan built and installed for $(uname -r)"
+            echo "linuwu_sense built and installed for $(uname -r)"
         else
-            echo "WARNING: DKMS build failed. Fan speed control will be" >&2
-            echo "         unavailable until it succeeds. Check:" >&2
+            echo "WARNING: DKMS build failed. Fan speed, battery limit and" >&2
+            echo "         keyboard colour will be unavailable. Check:" >&2
             echo "           dkms build -m $PKG -v $VER" >&2
             echo "         (is linux-headers-$(uname -r) installed?)" >&2
         fi
@@ -36,10 +47,26 @@ configure)
         echo "WARNING: dkms is not installed, the module cannot be built" >&2
     fi
 
-    # Load it now so nothing has to wait for a reboot.
-    modprobe predatortune_fan 2>/dev/null || true
+    # Swap the drivers now so nothing has to wait for a reboot. linuwu_sense
+    # is a fork of acer_wmi and claims the same platform device, so the
+    # in-tree one has to go first.
+    modprobe -r acer_wmi 2>/dev/null || true
+    modprobe linuwu_sense 2>/dev/null || true
 
     udevadm control --reload-rules 2>/dev/null || true
+    # Open up the new attributes for the tray and window straight away.
+    systemd-tmpfiles --create /usr/lib/tmpfiles.d/predatortune.conf 2>/dev/null || true
+
+    if [ ! -e /sys/devices/platform/acer-wmi/predator_sense/fan_speed ]; then
+        echo "WARNING: linuwu_sense did not take over. Fan control, the" >&2
+        echo "         battery limiter and keyboard colour need it." >&2
+        if grep -q '\[integrity\]\|\[confidentiality\]' \
+             /sys/kernel/security/lockdown 2>/dev/null; then
+            echo "         Secure Boot is on: enrol this machine's key with" >&2
+            echo "           sudo mokutil --import /var/lib/shim-signed/mok/MOK.der" >&2
+            echo "         then reboot and choose Enroll MOK." >&2
+        fi
+    fi
 
     # ---------------------------------------------------------------
     # Services

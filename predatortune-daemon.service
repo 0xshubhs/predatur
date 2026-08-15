@@ -10,6 +10,12 @@ ConditionVirtualization=no
 
 [Service]
 Type=simple
+# systemd-modules-load and systemd-tmpfiles-setup both run early, and nothing
+# orders the second after the first, so the permission fix can land before the
+# attributes it targets even exist. Doing it here removes the race: by the
+# time this unit starts, the module is up.
+ExecStartPre=-/sbin/modprobe linuwu_sense
+ExecStartPre=-/bin/systemd-tmpfiles --create /usr/lib/tmpfiles.d/predatortune.conf
 ExecStart=/usr/bin/predatortune-daemon
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always

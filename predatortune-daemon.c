@@ -20,7 +20,7 @@
 
 /* Overridable at compile time so the loop can be exercised off real hardware. */
 #ifndef FAN_SPEED_PATH
-#define FAN_SPEED_PATH "/sys/kernel/predatortune/fan_speed"
+#define FAN_SPEED_PATH "/sys/devices/platform/acer-wmi/predator_sense/fan_speed"
 #endif
 #ifndef CONFIG_PATH
 #define CONFIG_PATH    "/etc/predatortune/fan.conf"

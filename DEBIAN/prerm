@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PKG=predatortune
+PKG=linuwu-sense
 VER=2.0.0
 
 case "$1" in
@@ -18,7 +18,11 @@ remove|upgrade|deconfigure)
         dkms remove -m "$PKG" -v "$VER" --all >/dev/null 2>&1 || true
     fi
 
+    # Put the in-tree driver back; the blacklist goes with the package.
+    modprobe -r linuwu_sense 2>/dev/null || true
     modprobe -r predatortune_fan 2>/dev/null || true
+    rm -f /etc/modprobe.d/predatortune.conf
+    modprobe acer_wmi 2>/dev/null || true
 
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database /usr/share/applications 2>/dev/null || true

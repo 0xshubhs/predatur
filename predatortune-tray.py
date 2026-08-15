@@ -21,11 +21,27 @@ gi.require_version("AyatanaAppIndicator3", "0.1")
 from gi.repository import AyatanaAppIndicator3 as AppIndicator  # noqa: E402
 from gi.repository import GLib, Gtk  # noqa: E402
 
-FAN_SPEED = "/sys/kernel/predatortune/fan_speed"
+FAN_SPEED = "/sys/devices/platform/acer-wmi/predator_sense/fan_speed"
 PROFILE = "/sys/firmware/acpi/platform_profile"
 PROFILE_CHOICES = "/sys/firmware/acpi/platform_profile_choices"
 MANUAL_FLAG = "/run/predatortune/manual"
 HELPER = "/usr/local/bin/predatortune-helper"
+
+# linuwu_sense hangs these off the acer-wmi platform device.
+SENSE = "/sys/devices/platform/acer-wmi/predator_sense"
+BATTERY_LIMIT = f"{SENSE}/battery_limiter"
+KB_ZONES = "/sys/devices/platform/acer-wmi/four_zoned_kb/per_zone_mode"
+
+# Four zones plus a brightness, as "rrggbb,rrggbb,rrggbb,rrggbb,brightness".
+KB_COLOURS = [
+    ("Teal", "00aec7"),
+    ("Red", "ff0000"),
+    ("Green", "00ff00"),
+    ("Blue", "0000ff"),
+    ("Purple", "8000ff"),
+    ("Orange", "ff6000"),
+    ("White", "ffffff"),
+]
 
 REFRESH_SECONDS = 3
 
@@ -119,6 +135,51 @@ def secure_boot_blocking():
     return "[integrity]" in mode or "[confidentiality]" in mode
 
 
+def battery_limited():
+    """True when charging is capped at 80%. None when unsupported."""
+    v = read(BATTERY_LIMIT)
+    return None if v is None else v.strip() == "1"
+
+
+def set_battery_limit(on):
+    return write_sysfs(BATTERY_LIMIT, "1" if on else "0",
+                       ["set-battery-limit", "1" if on else "0"])
+
+
+def kb_brightness():
+    """The trailing field of per_zone_mode, kept when only the colour changes."""
+    cur = read(KB_ZONES)
+    if not cur:
+        return "100"
+    parts = cur.split(",")
+    return parts[4] if len(parts) > 4 else "100"
+
+
+def kb_current_colour():
+    cur = read(KB_ZONES)
+    return cur.split(",")[0] if cur else None
+
+
+def set_kb_colour(hex6):
+    zones = ",".join([hex6] * 4)
+    return write_sysfs(KB_ZONES, f"{zones},{kb_brightness()}",
+                       ["set-kb-colour", hex6])
+
+
+def write_sysfs(path, value, helper_args):
+    """
+    tmpfiles opens these to 0666 so the tray can write directly. If that has
+    not run yet, fall back to the helper — which takes a named action, never
+    an arbitrary path, since polkit now grants it without a password.
+    """
+    try:
+        with open(path, "w") as f:
+            f.write(value)
+        return True
+    except OSError:
+        return run_helper(helper_args)
+
+
 def manual_mode():
     return os.path.exists(MANUAL_FLAG)
 
@@ -200,6 +261,31 @@ class Tray:
 
         menu.append(Gtk.SeparatorMenuItem())
 
+        # Battery: the 80% cap PredatorSense offers on Windows.
+        self.items["battery"] = Gtk.CheckMenuItem(label="Stop charging at 80%")
+        self.items["battery"].connect("toggled", self.on_battery)
+        menu.append(self.items["battery"])
+
+        # Keyboard: four zones, all set to one colour. Per-zone lives in the
+        # window; a tray menu is the wrong place for a colour picker.
+        kb = Gtk.MenuItem(label="Keyboard colour")
+        kb_menu = Gtk.Menu()
+        kfirst = None
+        for name, hex6 in KB_COLOURS:
+            item = Gtk.RadioMenuItem(label=name)
+            if kfirst is None:
+                kfirst = item
+            else:
+                item.set_property("group", kfirst)
+            item.connect("activate", self.on_kb_colour, hex6)
+            kb_menu.append(item)
+            self.items[f"kb:{hex6}"] = item
+        kb.set_submenu(kb_menu)
+        menu.append(kb)
+        self.items["kb-parent"] = kb
+
+        menu.append(Gtk.SeparatorMenuItem())
+
         choices = (read(PROFILE_CHOICES) or "").split()
         if choices:
             header = Gtk.MenuItem(label="Performance profile")
@@ -244,6 +330,16 @@ class Tray:
             set_manual(True)
             write_fan(*speeds)
         self.refresh()
+
+    def on_battery(self, item):
+        if self.updating:
+            return
+        set_battery_limit(item.get_active())
+
+    def on_kb_colour(self, item, hex6):
+        if not item.get_active() or self.updating:
+            return
+        set_kb_colour(hex6)
 
     def on_profile(self, item, name):
         if not item.get_active() or self.updating:
@@ -298,6 +394,21 @@ class Tray:
         # Nothing to write to, so do not offer speeds that cannot be applied.
         for label, _ in PRESETS:
             self.items[f"preset:{label}"].set_sensitive(fan is not None)
+
+        limited = battery_limited()
+        self.items["battery"].set_sensitive(limited is not None)
+        if limited is not None:
+            self.updating = True
+            self.items["battery"].set_active(limited)
+            self.updating = False
+
+        colour = kb_current_colour()
+        self.items["kb-parent"].set_sensitive(colour is not None)
+        key = f"kb:{colour}"
+        if key in self.items:
+            self.updating = True
+            self.items[key].set_active(True)
+            self.updating = False
 
         # Reflect reality in the radio items without re-triggering them.
         self.updating = True
