@@ -3,3 +3,17 @@ deb-build/
 # Compiled binaries (built from .c sources)
 /predatortune
 /predatortune-helper
+/predatortune-daemon
+
+# Kernel module build output. The .c and dkms.conf are the sources now; the
+# module itself is built by DKMS on the machine it runs on.
+*.o
+*.ko
+*.ko.zst
+*.mod
+*.mod.c
+.*.cmd
+Module.symvers
+modules.order
+
+__pycache__/

@@ -1,0 +1,16 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+remove|purge)
+    systemctl daemon-reload 2>/dev/null || true
+    depmod -a 2>/dev/null || true
+    ;;
+esac
+
+if [ "$1" = "purge" ]; then
+    rm -rf /etc/predatortune
+    rm -rf /var/lib/dkms/predatortune
+fi
+
+exit 0

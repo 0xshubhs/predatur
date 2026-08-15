@@ -1,0 +1,36 @@
+[Unit]
+Description=PredatorTune automatic fan control
+Documentation=https://github.com/0xshubhs/predatur
+After=systemd-modules-load.service
+Wants=systemd-modules-load.service
+
+# Only run where the hardware actually is. On any other machine the WMI
+# calls have nothing to talk to.
+ConditionVirtualization=no
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/predatortune-daemon
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+
+# The tray drops a "manual" flag in here to tell the daemon to stand down
+# while the user sets a speed by hand. It has to be writable by the desktop
+# user, matching the udev rule that already opens fan_speed to local users.
+RuntimeDirectory=predatortune
+RuntimeDirectoryMode=0777
+RuntimeDirectoryPreserve=yes
+
+# The daemon exists to write one sysfs file. Nothing else needs to be reachable.
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

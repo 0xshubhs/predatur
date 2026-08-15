@@ -1,6 +1,29 @@
 #!/bin/bash
 set -e
 
-if command -v update-desktop-database &>/dev/null; then
-    update-desktop-database /usr/share/applications 2>/dev/null || true
-fi
+PKG=predatortune
+VER=2.0.0
+
+case "$1" in
+remove|upgrade|deconfigure)
+    # Stopping the daemon puts the fans back under firmware control on its
+    # way out, so the machine is never left with a speed we pinned.
+    systemctl disable --now predatortune-daemon.service 2>/dev/null || true
+    systemctl disable predatortune-resume.service 2>/dev/null || true
+
+    pkill -x predatortune-tray 2>/dev/null || true
+
+    if command -v dkms >/dev/null 2>&1 &&
+       dkms status -m "$PKG" -v "$VER" 2>/dev/null | grep -q .; then
+        dkms remove -m "$PKG" -v "$VER" --all >/dev/null 2>&1 || true
+    fi
+
+    modprobe -r predatortune_fan 2>/dev/null || true
+
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database /usr/share/applications 2>/dev/null || true
+    fi
+    ;;
+esac
+
+exit 0

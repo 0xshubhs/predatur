@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=PredatorTune Indicator
+GenericName=Fan and thermal indicator
+Comment=Temperature and fan control in the top bar
+Exec=/usr/bin/predatortune-tray
+Icon=predatortune
+Terminal=false
+Categories=System;Settings;HardwareSettings;
+Keywords=fan;temperature;cooling;predator;
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+NoDisplay=true

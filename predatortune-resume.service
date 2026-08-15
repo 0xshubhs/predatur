@@ -1,0 +1,14 @@
+[Unit]
+Description=Reapply PredatorTune fan control after resume
+Documentation=https://github.com/0xshubhs/predatur
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+# Firmware takes the fans back over a sleep cycle, and the daemon only writes
+# on a change, so without this it would sit there believing its last setting
+# still applied. A restart forces a fresh write.
+ExecStart=/bin/systemctl restart predatortune-daemon.service
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
