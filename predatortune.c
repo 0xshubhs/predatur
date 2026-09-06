@@ -697,6 +697,12 @@ static gboolean refresh(gpointer user_data)
     (void)user_data;
     char buf[256];
 
+    /* The window takes every label with it when it closes, so a tick that
+     * outlives it writes freed memory — a burst of Gtk-CRITICALs on exit.
+     * on_window_destroy clears the state; this is the tick noticing. */
+    if (!app_state.window)
+        return G_SOURCE_REMOVE;
+
     /* Battery limiter: show what the hardware says, not what was last clicked,
      * so an external change (the tray, PredatorSense on a dual boot) shows up. */
     if (app_state.battery_switch) {
@@ -795,6 +801,30 @@ static gboolean refresh(gpointer user_data)
     }
 
     return G_SOURCE_CONTINUE;
+}
+
+/* The same handler drives the 2s tick and the initial paint, but an idle
+ * callback returning G_SOURCE_CONTINUE is re-dispatched as fast as the main
+ * loop can run it — which is not a refresh every 2s, it is a spin that held a
+ * core at 40% for as long as the window was open. Once is once. */
+static gboolean refresh_once(gpointer user_data)
+{
+    refresh(user_data);
+    return G_SOURCE_REMOVE;
+}
+
+static void on_window_destroy(GtkWidget *widget, gpointer user_data)
+{
+    (void)widget;
+    (void)user_data;
+
+    if (app_state.tick_id) {
+        g_source_remove(app_state.tick_id);
+        app_state.tick_id = 0;
+    }
+    /* Every widget pointer in here belongs to the window that is going away.
+     * build_window fills them in again if the app is activated a second time. */
+    memset(&app_state, 0, sizeof(app_state));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1187,8 +1217,10 @@ static void build_window(AdwApplication *adw_app)
     gtk_box_append(GTK_BOX(root_box), app_state.status_label);
 
     /* ---- Refresh timer ---- */
+    g_signal_connect(app_state.window, "destroy",
+                     G_CALLBACK(on_window_destroy), NULL);
     app_state.tick_id = g_timeout_add(2000, refresh, NULL);
-    g_idle_add(refresh, NULL);
+    g_idle_add(refresh_once, NULL);
 
     gtk_window_present(GTK_WINDOW(app_state.window));
 }
