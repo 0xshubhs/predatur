@@ -106,10 +106,25 @@ def gpu_temp():
             ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader"],
             capture_output=True, text=True, timeout=4,
         )
-        m = re.search(r"\d+", out.stdout)
-        return int(m.group()) if m else None
     except (OSError, subprocess.SubprocessError):
         return None
+
+    # nvidia-smi prints its own failures on stdout, so there is always
+    # something to scrape:
+    #
+    #   Failed to initialize NVML: Driver/library version mismatch
+    #   NVML library version: 595.91
+    #
+    # A search for the first run of digits finds the 595 of that version and
+    # the panel reads "G 595deg". Believe the exit status, then take the line
+    # only if it is a bare number a GPU could actually report.
+    if out.returncode != 0:
+        return None
+    line = out.stdout.strip()
+    if not re.fullmatch(r"\d+", line):
+        return None
+    value = int(line)
+    return value if 0 <= value <= 125 else None
 
 
 def fan_percent():
