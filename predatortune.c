@@ -158,28 +158,51 @@ static int read_cpu_core_temps(double *temps, int max_count, double *min_out, do
     return count;
 }
 
-static double read_gpu_temp(void)
+/*
+ * nvidia-smi reports its own failures on stdout, not stderr — "Failed to
+ * initialize NVML: Driver/library version mismatch" followed by a line naming
+ * the library version — so the 2>/dev/null this used to rely on never hid
+ * anything, and whatever came back was parsed as a reading. That is how a
+ * 595.xx driver version ended up on screen as a GPU temperature.
+ *
+ * So: believe the exit status first, then insist on a bare number that lands
+ * in a range a GPU could actually produce.
+ */
+static double nvidia_query(const char *field, double lo, double hi)
 {
-    FILE *p = popen("nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null", "r");
+    char cmd[160];
+    snprintf(cmd, sizeof(cmd),
+             "nvidia-smi --query-gpu=%s --format=csv,noheader,nounits 2>/dev/null",
+             field);
+
+    FILE *p = popen(cmd, "r");
     if (!p) return -1.0;
+
     char buf[64] = {0};
-    if (fgets(buf, sizeof(buf), p) == NULL) { pclose(p); return -1.0; }
-    pclose(p);
+    char *line = fgets(buf, sizeof(buf), p);
+    int rc = pclose(p);
+    if (!line || rc != 0) return -1.0;
+
     char *end;
     double v = strtod(buf, &end);
-    return (end != buf) ? v : -1.0;
+    if (end == buf) return -1.0;
+
+    /* Nothing but the value belongs on the line: "[N/A]" and prose are out
+     * already, but this also rejects anything with a unit or a second field. */
+    while (*end == ' ' || *end == '\r' || *end == '\n') end++;
+    if (*end != '\0') return -1.0;
+
+    return (v >= lo && v <= hi) ? v : -1.0;
+}
+
+static double read_gpu_temp(void)
+{
+    return nvidia_query("temperature.gpu", 0.0, 125.0);
 }
 
 static double read_gpu_power(void)
 {
-    FILE *p = popen("nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits 2>/dev/null", "r");
-    if (!p) return -1.0;
-    char buf[64] = {0};
-    if (fgets(buf, sizeof(buf), p) == NULL) { pclose(p); return -1.0; }
-    pclose(p);
-    char *end;
-    double v = strtod(buf, &end);
-    return (end != buf) ? v : -1.0;
+    return nvidia_query("power.draw", 0.0, 1000.0);
 }
 
 /* -------------------------------------------------------------------------- */
