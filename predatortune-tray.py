@@ -95,10 +95,42 @@ def gpu_device():
 GPU_DEV = gpu_device()
 
 
+def acer_hwmon():
+    """linuwu_sense's hwmon, found by name because the numbering moves."""
+    for entry in sorted(os.listdir("/sys/class/hwmon")):
+        base = os.path.join("/sys/class/hwmon", entry)
+        if read(os.path.join(base, "name")) == "acer":
+            return base
+    return None
+
+
+ACER_HWMON = acer_hwmon()
+
+
+def ec_gpu_temp():
+    """
+    The EC reports the GPU temperature over WMI and linuwu_sense exposes it as
+    temp2_input — channel 1 of the driver's map is GPU_TEMPERATURE. A plain
+    sysfs read, so it costs nothing, never wakes the dGPU, and still works when
+    nvidia-smi cannot talk to the driver.
+    """
+    if not ACER_HWMON:
+        return None
+    raw = read(os.path.join(ACER_HWMON, "temp2_input"))
+    if not raw or not raw.isdigit():
+        return None
+    value = int(raw) // 1000
+    return value if 0 < value <= 125 else None
+
+
 def gpu_temp():
-    """Skipped while the dGPU is asleep — asking would wake it."""
+    """EC first; nvidia-smi only where the EC does not report the sensor."""
+    ec = ec_gpu_temp()
+    if ec is not None:
+        return ec
     if not GPU_DEV:
         return None
+    # Skipped while the dGPU is asleep — asking would wake it.
     if read(os.path.join(GPU_DEV, "power/runtime_status")) != "active":
         return None
     try:

@@ -167,6 +167,45 @@ static int read_str_file(const char *path, char *buf, size_t n)
  * rather than hardcoding a path, and prefer the package sensor over an
  * individual core.
  */
+/*
+ * linuwu_sense's hwmon, found by name because the numbering moves. It carries
+ * the EC's own GPU temperature on temp2_input, which is what the fan curve
+ * wants: a sysfs read cannot fail the way shelling out to nvidia-smi can.
+ */
+static int find_acer_hwmon(char *out, size_t n)
+{
+	DIR *d = opendir("/sys/class/hwmon");
+	struct dirent *e;
+	int found = 0;
+
+	if (!d)
+		return 0;
+
+	while (!found && (e = readdir(d))) {
+		char base[320], path[420], name[64];
+
+		if (strncmp(e->d_name, "hwmon", 5) != 0)
+			continue;
+
+		snprintf(base, sizeof(base), "/sys/class/hwmon/%s", e->d_name);
+		snprintf(path, sizeof(path), "%s/name", base);
+		if (!read_str_file(path, name, sizeof(name)))
+			continue;
+		if (strcmp(name, "acer") != 0)
+			continue;
+
+		snprintf(path, sizeof(path), "%s/temp2_input", base);
+		if (!read_str_file(path, name, sizeof(name)))
+			continue;
+
+		snprintf(out, n, "%s", path);
+		found = 1;
+	}
+
+	closedir(d);
+	return found;
+}
+
 static int find_cpu_sensor(char *out, size_t n)
 {
 	DIR *d = opendir("/sys/class/hwmon");
@@ -212,6 +251,8 @@ static int find_cpu_sensor(char *out, size_t n)
 	return found;
 }
 
+static char acer_gpu_temp_path[420];
+
 /* Locate the discrete NVIDIA GPU so its power state can be checked. */
 static int find_gpu_device(char *out, size_t n)
 {
@@ -255,6 +296,13 @@ static int read_gpu_temp(const char *gpu_dev)
 	char path[420], status[32], line[64];
 	FILE *p;
 	int temp;
+
+	/* The EC knows the GPU temperature whatever state the nvidia driver is
+	 * in, and this is the reading the curve runs on, so prefer it. */
+	if (acer_gpu_temp_path[0] &&
+	    read_str_file(acer_gpu_temp_path, line, sizeof(line)) &&
+	    sscanf(line, "%d", &temp) == 1 && temp > 0)
+		return temp / 1000;
 
 	if (!gpu_dev[0])
 		return NO_READING;
@@ -392,6 +440,9 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 	fprintf(stderr, "cpu sensor: %s\n", cpu_path);
+
+	if (find_acer_hwmon(acer_gpu_temp_path, sizeof(acer_gpu_temp_path)))
+		fprintf(stderr, "gpu sensor: %s\n", acer_gpu_temp_path);
 
 	if (find_gpu_device(gpu_dev, sizeof(gpu_dev)))
 		fprintf(stderr, "gpu: %s\n", gpu_dev);

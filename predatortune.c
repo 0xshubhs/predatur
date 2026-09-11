@@ -195,8 +195,24 @@ static double nvidia_query(const char *field, double lo, double hi)
     return (v >= lo && v <= hi) ? v : -1.0;
 }
 
+/*
+ * The EC reports the GPU temperature over WMI and linuwu_sense exposes it as
+ * temp2_input on the acer hwmon — channel 1 of the driver's map is
+ * ACER_WMID_SENSOR_GPU_TEMPERATURE. It is a plain sysfs read: no subprocess
+ * every two seconds, nothing that wakes the dGPU to answer, and it keeps
+ * working when nvidia-smi cannot talk to the driver at all (a userspace NVML
+ * newer than the loaded kernel module, say). nvidia-smi stays as the fallback
+ * for a machine whose EC does not report the sensor.
+ */
 static double read_gpu_temp(void)
 {
+    if (have_hwmon_fan) {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/temp2_input", hwmon_fan);
+        int milli;
+        if (read_sysfs_int(path, &milli) == 0 && milli > 0)
+            return milli / 1000.0;
+    }
     return nvidia_query("temperature.gpu", 0.0, 125.0);
 }
 
